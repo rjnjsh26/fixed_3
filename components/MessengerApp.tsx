@@ -94,6 +94,29 @@ async function deleteFromThread(key, messageId, requesterName) {
   });
   return res.ok;
 }
+async function getGroups() {
+  try {
+    const res = await fetch("/api/groups");
+    const data = await res.json();
+    return data.groups || [];
+  } catch {
+    return [];
+  }
+}
+async function createGroup(name, members) {
+  try {
+    const res = await fetch("/api/groups", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, members }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.group || null;
+  } catch {
+    return null;
+  }
+}
 
 export default function App() {
   const [phase, setPhase] = useState("loading"); // loading -> name -> app (passcode is checked server-side, before this ever loads)
@@ -105,11 +128,15 @@ export default function App() {
   const [activeLabel, setActiveLabel] = useState(""); // display name for header
   const [activeIsGroup, setActiveIsGroup] = useState(false);
   const [directory, setDirectory] = useState<string[]>([]);
+  const [groups, setGroups] = useState<any[]>([]);
   const [query, setQuery] = useState("");
   const [threadMsgs, setThreadMsgs] = useState<any[]>([]);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);
+  const [newGroupName, setNewGroupName] = useState("");
+  const [newGroupMembers, setNewGroupMembers] = useState<string[]>([]);
+  const [creatingGroup, setCreatingGroup] = useState(false);
   const fileRef = useRef(null);
   const scrollRef = useRef(null);
 
@@ -129,13 +156,13 @@ export default function App() {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [threadMsgs]);
 
-  // refresh directory while on the list screen
+  // refresh directory + groups while on the list screen
   useEffect(() => {
     if (phase !== "app" || screen !== "list") return;
     let cancelled = false;
     const tick = async () => {
-      const d = await getDirectory();
-      if (!cancelled) setDirectory(d);
+      const [d, g] = await Promise.all([getDirectory(), getGroups()]);
+      if (!cancelled) { setDirectory(d); setGroups(g); }
     };
     tick();
     const id = setInterval(tick, DIRECTORY_POLL_MS);
@@ -179,6 +206,31 @@ export default function App() {
     setActiveLabel(label);
     setActiveIsGroup(isGroup);
     setScreen("chat");
+  };
+
+  const openNewGroup = () => {
+    setNewGroupName("");
+    setNewGroupMembers([]);
+    setScreen("newGroup");
+  };
+
+  const toggleGroupMember = (name) => {
+    setNewGroupMembers((cur) => (cur.includes(name) ? cur.filter((n) => n !== name) : [...cur, name]));
+  };
+
+  const submitNewGroup = async () => {
+    const name = newGroupName.trim();
+    if (!name || newGroupMembers.length === 0 || creatingGroup) return;
+    setCreatingGroup(true);
+    const group = await createGroup(name, [myName, ...newGroupMembers]);
+    setCreatingGroup(false);
+    if (!group) {
+      window.alert("Couldn't create the group — try again.");
+      return;
+    }
+    const fresh = await getGroups();
+    setGroups(fresh);
+    openChat(`group:${group.id}`, group.name, true);
   };
 
   const sendText = async () => {
@@ -265,9 +317,14 @@ export default function App() {
           <div style={styles.screen}>
             <div style={styles.listHeader}>
               <span style={styles.appTitle}>Internal Use Only</span>
-              <button style={{ ...styles.avatarSm, ...avatarStyle(myName), border: "none", cursor: "pointer", padding: 0 }} onClick={switchUser} aria-label="Switch user" title="Not you? Switch user">
-                <span style={styles.avatarInitialsSm}>{initials(myName)}</span>
-              </button>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <button style={styles.newGroupBtn} onClick={openNewGroup} aria-label="New group" title="New group">
+                  <Plus size={16} color="#08201B" />
+                </button>
+                <button style={{ ...styles.avatarSm, ...avatarStyle(myName), border: "none", cursor: "pointer", padding: 0 }} onClick={switchUser} aria-label="Switch user" title="Not you? Switch user">
+                  <span style={styles.avatarInitialsSm}>{initials(myName)}</span>
+                </button>
+              </div>
             </div>
 
             <div style={styles.searchWrap}>
@@ -286,6 +343,20 @@ export default function App() {
                 </div>
               </button>
 
+              {groups
+                .filter((g) => Array.isArray(g.members) && g.members.includes(myName))
+                .map((g) => (
+                  <button key={g.id} style={styles.chatRow} onClick={() => openChat(`group:${g.id}`, g.name, true)}>
+                    <div style={{ ...styles.avatar, ...avatarStyle(g.name) }}>
+                      <Users size={18} color="rgba(255,255,255,0.92)" />
+                    </div>
+                    <div style={styles.chatRowBody}>
+                      <div style={styles.chatRowTop}><span style={styles.chatName}>{g.name}</span></div>
+                      <div style={styles.chatRowBottom}><span style={styles.chatPreview}>{g.members.length} members</span></div>
+                    </div>
+                  </button>
+                ))}
+
               {filteredOthers.map((name) => (
                 <button key={name} style={styles.chatRow} onClick={() => openChat(pairKey(myName, name), name, false)}>
                   <div style={{ ...styles.avatar, ...avatarStyle(name) }}>
@@ -303,6 +374,57 @@ export default function App() {
               )}
             </div>
           </div>
+        ) : screen === "newGroup" ? (
+          <div style={styles.screen}>
+            <div style={styles.chatHeader}>
+              <button style={styles.iconBtn} onClick={() => setScreen("list")} aria-label="Back"><ArrowLeft size={20} color={TEXT} /></button>
+              <span style={styles.chatHeaderName}>New group</span>
+            </div>
+
+            <div style={{ padding: "14px 16px 6px" }}>
+              <input
+                style={styles.searchInput2}
+                placeholder="Group name"
+                value={newGroupName}
+                onChange={(e) => setNewGroupName(e.target.value)}
+                autoFocus
+              />
+            </div>
+
+            <div style={{ padding: "4px 16px 8px" }}>
+              <span style={styles.sectionLabel}>Add people from your circle</span>
+            </div>
+
+            <div style={styles.chatScroll}>
+              {others.map((name) => {
+                const selected = newGroupMembers.includes(name);
+                return (
+                  <button key={name} style={styles.chatRow} onClick={() => toggleGroupMember(name)}>
+                    <div style={{ ...styles.avatar, ...avatarStyle(name) }}>
+                      <span style={styles.avatarInitials}>{initials(name)}</span>
+                    </div>
+                    <div style={styles.chatRowBody}>
+                      <div style={styles.chatRowTop}><span style={styles.chatName}>{name}</span></div>
+                    </div>
+                    <div style={{ ...styles.checkbox, ...(selected ? styles.checkboxOn : {}) }} />
+                  </button>
+                );
+              })}
+              {others.length === 0 && (
+                <div style={styles.emptyState}>No one else has joined with this link yet, so there's no one to add.</div>
+              )}
+            </div>
+
+            <div style={{ padding: "10px 16px 20px" }}>
+              <button
+                style={{ ...styles.gateBtn, marginTop: 0, opacity: newGroupName.trim() && newGroupMembers.length > 0 && !creatingGroup ? 1 : 0.5 }}
+                onClick={submitNewGroup}
+                disabled={!newGroupName.trim() || newGroupMembers.length === 0 || creatingGroup}
+              >
+                {creatingGroup ? "Creating…" : `Create group${newGroupMembers.length ? ` (${newGroupMembers.length + 1})` : ""}`}
+              </button>
+            </div>
+          </div>
         ) : (
           <div style={styles.screen}>
             <div style={styles.chatHeader}>
@@ -318,7 +440,11 @@ export default function App() {
               )}
               <div style={styles.chatHeaderText}>
                 <span style={styles.chatHeaderName}>{activeLabel}</span>
-                <span style={styles.chatHeaderStatus}>{activeIsGroup ? `${directory.length} in your circle` : "syncing…"}</span>
+                <span style={styles.chatHeaderStatus}>
+                  {activeIsGroup
+                    ? `${activeKey === EVERYONE_KEY ? directory.length : (groups.find((g) => `group:${g.id}` === activeKey)?.members?.length ?? "?")} in this group`
+                    : "syncing…"}
+                </span>
               </div>
             </div>
 
@@ -433,6 +559,11 @@ const styles: Record<string, React.CSSProperties> = {
 
   searchWrap: { display: "flex", alignItems: "center", gap: 8, background: SURFACE, margin: "6px 16px 4px", padding: "9px 12px", borderRadius: 12, border: `1px solid ${BORDER}` },
   searchInput: { flex: 1, background: "transparent", border: "none", outline: "none", color: TEXT, fontSize: 14, fontFamily: "'Inter', sans-serif" },
+  searchInput2: { width: "100%", background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 12, padding: "10px 14px", color: TEXT, fontSize: 15, outline: "none", fontFamily: "'Inter', sans-serif", boxSizing: "border-box" },
+  sectionLabel: { fontSize: 12, color: TEXT_SECONDARY, textTransform: "uppercase", letterSpacing: 0.4 },
+  newGroupBtn: { width: 30, height: 30, borderRadius: 15, background: ACCENT, border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" },
+  checkbox: { width: 20, height: 20, borderRadius: 6, border: `1.5px solid ${BORDER}`, flexShrink: 0 },
+  checkboxOn: { background: ACCENT, borderColor: ACCENT },
 
   chatScroll: { flex: 1, overflowY: "auto", padding: "4px 8px 8px" },
   chatRow: { width: "100%", display: "flex", alignItems: "center", gap: 12, padding: "10px 10px", background: "transparent", border: "none", cursor: "pointer", textAlign: "left", borderRadius: 14 },
