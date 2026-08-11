@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { signToken, timingSafeEqual } from "../../../lib/auth";
+import { getSessionEpoch } from "../../../lib/redis";
 
 export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}));
@@ -11,7 +12,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Incorrect passcode." }, { status: 401 });
   }
 
-  const token = await signToken();
+  const epoch = await getSessionEpoch();
+  const token = await signToken(epoch);
   const res = NextResponse.json({ ok: true });
   res.cookies.set("euo_session", token, {
     httpOnly: true,
