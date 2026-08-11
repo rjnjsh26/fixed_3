@@ -31,15 +31,18 @@ function fromBase64Url(b64url: string) {
   return arr;
 }
 
-export async function signToken(): Promise<string> {
+// `epoch` ties a token to a specific "session generation." The weekly reset
+// job bumps the epoch stored in Redis, which instantly invalidates every
+// token signed before that point — even ones with time left on their cookie.
+export async function signToken(epoch: string): Promise<string> {
   const exp = Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000;
-  const payloadB64 = toBase64Url(encoder.encode(JSON.stringify({ exp })));
+  const payloadB64 = toBase64Url(encoder.encode(JSON.stringify({ exp, epoch })));
   const key = await getKey();
   const sig = await crypto.subtle.sign("HMAC", key, encoder.encode(payloadB64));
   return `${payloadB64}.${toBase64Url(sig)}`;
 }
 
-export async function verifyToken(token: string): Promise<boolean> {
+export async function verifyToken(token: string, currentEpoch: string): Promise<boolean> {
   try {
     const [payloadB64, sigB64] = token.split(".");
     if (!payloadB64 || !sigB64) return false;
@@ -47,7 +50,7 @@ export async function verifyToken(token: string): Promise<boolean> {
     const expectedSig = await crypto.subtle.sign("HMAC", key, encoder.encode(payloadB64));
     if (toBase64Url(expectedSig) !== sigB64) return false;
     const payload = JSON.parse(new TextDecoder().decode(fromBase64Url(payloadB64)));
-    return typeof payload.exp === "number" && payload.exp > Date.now();
+    return typeof payload.exp === "number" && payload.exp > Date.now() && payload.epoch === currentEpoch;
   } catch {
     return false;
   }

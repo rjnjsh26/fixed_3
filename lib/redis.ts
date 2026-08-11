@@ -15,3 +15,16 @@ export function getRedis(): Redis {
   }
   return client;
 }
+
+// The current "session generation." Every login token is stamped with this
+// value; bumping it (done by the weekly reset job) instantly invalidates
+// every session that was signed before the bump.
+export async function getSessionEpoch(): Promise<string> {
+  const redis = getRedis();
+  let epoch = await redis.get<string>("euo:session_epoch");
+  if (!epoch) {
+    epoch = `${Date.now()}`;
+    await redis.set("euo:session_epoch", epoch);
+  }
+  return epoch;
+}
