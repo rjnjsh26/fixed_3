@@ -1,6 +1,6 @@
 "use client";
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import { ArrowLeft, Search, Image as ImageIcon, Send, Users, X, Plus } from "lucide-react";
+import { ArrowLeft, Search, Image as ImageIcon, Send, Users, X, Plus, Trash2 } from "lucide-react";
 
 const EVERYONE_KEY = "everyone";
 const POLL_MS = 2500;
@@ -85,6 +85,14 @@ async function appendToThread(key, msg) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ message: msg }),
   });
+}
+async function deleteFromThread(key, messageId, requesterName) {
+  const res = await fetch(`/api/thread/${encodeURIComponent(key)}`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ messageId, requesterName }),
+  });
+  return res.ok;
 }
 
 export default function App() {
@@ -198,6 +206,19 @@ export default function App() {
     }
   };
 
+  const deleteMessage = async (messageId) => {
+    if (!activeKey) return;
+    if (!window.confirm("Delete this message for everyone?")) return;
+    // optimistic: swap it to a tombstone locally right away
+    setThreadMsgs((m) => m.map((msg) => (msg.id === messageId ? { id: msg.id, from: msg.from, t: msg.t, type: "deleted" } : msg)));
+    const ok = await deleteFromThread(activeKey, messageId, myName);
+    if (!ok) {
+      // failed server-side — resync with the real state
+      const fresh = await getThread(activeKey);
+      setThreadMsgs(fresh);
+    }
+  };
+
   if (phase === "loading") {
     return <GatePhone><div /></GatePhone>;
   }
@@ -304,7 +325,7 @@ export default function App() {
             <div style={styles.messageScroll} ref={scrollRef}>
               {threadMsgs.length === 0 && <div style={styles.emptyState}>No messages yet — say hi.</div>}
               {threadMsgs.map((m) => (
-                <Bubble key={m.id} msg={m} mine={m.from === myName} showAuthor={activeIsGroup && m.from !== myName} onImageTap={setLightbox} />
+                <Bubble key={m.id} msg={m} mine={m.from === myName} showAuthor={activeIsGroup && m.from !== myName} onImageTap={setLightbox} onDelete={deleteMessage} />
               ))}
             </div>
 
@@ -353,12 +374,20 @@ function GatePhone({ children }) {
   );
 }
 
-function Bubble({ msg, mine, showAuthor, onImageTap }) {
+function Bubble({ msg, mine, showAuthor, onImageTap, onDelete }) {
+  const canDelete = mine && msg.type !== "deleted";
   return (
     <div style={{ ...styles.bubbleRow, justifyContent: mine ? "flex-end" : "flex-start" }}>
+      {canDelete && (
+        <button style={styles.deleteBtn} onClick={() => onDelete(msg.id)} aria-label="Delete for everyone" title="Delete for everyone">
+          <Trash2 size={13} color={TEXT_SECONDARY} />
+        </button>
+      )}
       <div style={{ ...styles.bubble, ...(mine ? styles.bubbleMe : styles.bubbleThem) }}>
         {showAuthor && <span style={styles.bubbleAuthor}>{msg.from}</span>}
-        {msg.type === "image" ? (
+        {msg.type === "deleted" ? (
+          <span style={styles.bubbleDeleted}>{mine ? "You deleted this message" : "This message was deleted"}</span>
+        ) : msg.type === "image" ? (
           <img src={msg.url} alt="Sent" style={styles.bubbleImage} onClick={() => onImageTap(msg.url)} />
         ) : (
           <span style={styles.bubbleText}>{msg.text}</span>
@@ -434,6 +463,12 @@ const styles: Record<string, React.CSSProperties> = {
   bubbleImage: { width: 190, height: 190, objectFit: "cover", borderRadius: 12, display: "block", cursor: "zoom-in", marginBottom: 2 },
   bubbleMeta: { display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 3, marginTop: 2 },
   bubbleTime: { fontSize: 10.5, color: "rgba(255,255,255,0.55)" },
+  bubbleDeleted: { fontSize: 13.5, fontStyle: "italic", color: "rgba(255,255,255,0.5)" },
+  deleteBtn: {
+    alignSelf: "center", width: 24, height: 24, borderRadius: 12, border: "none",
+    background: SURFACE, display: "flex", alignItems: "center", justifyContent: "center",
+    cursor: "pointer", margin: "0 6px", opacity: 0.55, flexShrink: 0,
+  },
 
   composer: { display: "flex", alignItems: "center", gap: 6, padding: "8px 10px 18px", borderTop: `1px solid ${BORDER}` },
   composerInput: { flex: 1, background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 20, padding: "9px 14px", color: TEXT, fontSize: 14, outline: "none", fontFamily: "'Inter', sans-serif" },
