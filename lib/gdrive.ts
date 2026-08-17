@@ -41,7 +41,7 @@ export async function uploadToDrive(buffer: Buffer, mimeType: string, filename: 
   const created = await drive.files.create({
     requestBody: { name: filename, parents: folderId ? [folderId] : undefined },
     media: { mimeType, body: Readable.from(buffer) },
-    fields: "id, webViewLink",
+    fields: "id, name, webViewLink, mimeType",
   });
 
   const fileId = created.data.id!;
@@ -55,6 +55,8 @@ export async function uploadToDrive(buffer: Buffer, mimeType: string, filename: 
 
   return {
     id: fileId,
+    name: created.data.name || filename,
+    mimeType: created.data.mimeType || mimeType,
     viewUrl: created.data.webViewLink || `https://drive.google.com/file/d/${fileId}/view`,
     imageUrl: `https://drive.google.com/thumbnail?id=${fileId}&sz=w1600`,
   };
