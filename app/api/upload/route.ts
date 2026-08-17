@@ -20,8 +20,12 @@ export async function POST(req: Request) {
     const result = await uploadToDrive(buffer, file.type || "application/octet-stream", file.name || `upload-${Date.now()}.jpg`);
     return NextResponse.json({ ok: true, ...result });
   } catch (err) {
+    // TEMPORARY: surfaces the real Google API error for debugging. Once
+    // uploads are working reliably, switch this back to a generic message
+    // so internal error details aren't exposed to the browser.
+    const detail = err instanceof Error ? err.message : String(err);
     return NextResponse.json(
-      { error: "Upload to Google Drive failed. Check GOOGLE_REFRESH_TOKEN and GDRIVE_FOLDER_ID are set correctly." },
+      { error: "Upload to Google Drive failed.", detail },
       { status: 500 }
     );
   }
