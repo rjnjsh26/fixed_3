@@ -25,7 +25,7 @@ function formatTime(t) {
 function pairKey(a, b) {
   return [a, b].sort((x, y) => x.localeCompare(y)).join("::");
 }
-async function compressImage(file: File, maxDim = 720, quality = 0.6): Promise<string> {
+async function compressImageToBlob(file: File, maxDim = 1600, quality = 0.82): Promise<Blob> {
   const dataUrl = await new Promise<string>((res, rej) => {
     const r = new FileReader();
     r.onload = () => res(r.result as string);
@@ -44,7 +44,17 @@ async function compressImage(file: File, maxDim = 720, quality = 0.6): Promise<s
   canvas.height = Math.round(img.height * scale);
   const ctx = canvas.getContext("2d");
   ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL("image/jpeg", quality);
+  return new Promise<Blob>((res, rej) => {
+    canvas.toBlob((blob) => (blob ? res(blob) : rej(new Error("toBlob failed"))), "image/jpeg", quality);
+  });
+}
+
+async function uploadImage(blob: Blob, filename: string) {
+  const form = new FormData();
+  form.append("file", blob, filename);
+  const res = await fetch("/api/upload", { method: "POST", body: form });
+  if (!res.ok) throw new Error("upload failed");
+  return res.json(); // { id, viewUrl, imageUrl }
 }
 
 // ---------- server API helpers (the passcode gate already ran in middleware) ----------
@@ -247,13 +257,26 @@ export default function App() {
   const sendImages = async (fileList: FileList) => {
     if (!activeKey) return;
     for (const file of Array.from(fileList).slice(0, 3)) {
+      const tempId = `${Date.now()}-${Math.random()}`;
+      // optimistic placeholder while it uploads to Drive
+      setThreadMsgs((m) => [...m, { id: tempId, from: myName, type: "uploading", t: Date.now() }]);
       try {
-        const url = await compressImage(file);
-        const msg = { id: `${Date.now()}-${Math.random()}`, from: myName, type: "image", url, t: Date.now() };
-        setThreadMsgs((m) => [...m, msg]);
+        const blob = await compressImageToBlob(file);
+        const uploaded = await uploadImage(blob, file.name || "photo.jpg");
+        const msg = {
+          id: tempId,
+          from: myName,
+          type: "image",
+          url: uploaded.imageUrl,
+          viewUrl: uploaded.viewUrl,
+          driveId: uploaded.id,
+          t: Date.now(),
+        };
+        setThreadMsgs((m) => m.map((x) => (x.id === tempId ? msg : x)));
         await appendToThread(activeKey, msg);
       } catch {
-        // skip files that fail to read/compress
+        setThreadMsgs((m) => m.filter((x) => x.id !== tempId));
+        window.alert("Couldn't upload that image to Google Drive — try again.");
       }
     }
   };
@@ -501,7 +524,7 @@ function GatePhone({ children }) {
 }
 
 function Bubble({ msg, mine, showAuthor, onImageTap, onDelete }) {
-  const canDelete = mine && msg.type !== "deleted";
+  const canDelete = mine && msg.type !== "deleted" && msg.type !== "uploading";
   return (
     <div style={{ ...styles.bubbleRow, justifyContent: mine ? "flex-end" : "flex-start" }}>
       {canDelete && (
@@ -513,8 +536,10 @@ function Bubble({ msg, mine, showAuthor, onImageTap, onDelete }) {
         {showAuthor && <span style={styles.bubbleAuthor}>{msg.from}</span>}
         {msg.type === "deleted" ? (
           <span style={styles.bubbleDeleted}>{mine ? "You deleted this message" : "This message was deleted"}</span>
+        ) : msg.type === "uploading" ? (
+          <span style={styles.bubbleDeleted}>Uploading to Drive…</span>
         ) : msg.type === "image" ? (
-          <img src={msg.url} alt="Sent" style={styles.bubbleImage} onClick={() => onImageTap(msg.url)} />
+          <img src={msg.url} alt="Sent" style={styles.bubbleImage} onClick={() => onImageTap(msg.viewUrl || msg.url)} />
         ) : (
           <span style={styles.bubbleText}>{msg.text}</span>
         )}
