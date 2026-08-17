@@ -1,6 +1,6 @@
 "use client";
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import { ArrowLeft, Search, Image as ImageIcon, Send, Users, X, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, Search, Send, Users, X, Plus, Trash2, Paperclip, FileText, FileSpreadsheet, File as FileIconGeneric, Archive } from "lucide-react";
 
 const EVERYONE_KEY = "everyone";
 const POLL_MS = 2500;
@@ -25,17 +25,32 @@ function formatTime(t) {
 function pairKey(a, b) {
   return [a, b].sort((x, y) => x.localeCompare(y)).join("::");
 }
+function formatBytes(bytes) {
+  if (!bytes && bytes !== 0) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+function fileIconFor(mimeType, name) {
+  const n = (name || "").toLowerCase();
+  const m = mimeType || "";
+  if (m.includes("pdf") || n.endsWith(".pdf")) return FileText;
+  if (m.includes("word") || n.endsWith(".doc") || n.endsWith(".docx")) return FileText;
+  if (m.includes("sheet") || m.includes("excel") || n.endsWith(".xls") || n.endsWith(".xlsx") || n.endsWith(".csv")) return FileSpreadsheet;
+  if (m.includes("zip") || m.includes("compressed") || n.endsWith(".zip") || n.endsWith(".rar")) return Archive;
+  return FileIconGeneric;
+}
 async function compressImageToBlob(file: File, maxDim = 1600, quality = 0.82): Promise<Blob> {
   const dataUrl = await new Promise<string>((res, rej) => {
     const r = new FileReader();
     r.onload = () => res(r.result as string);
-    r.onerror = rej;
+    r.onerror = () => rej(new Error("Couldn't read the selected file."));
     r.readAsDataURL(file);
   });
   const img = await new Promise<HTMLImageElement>((res, rej) => {
     const i = new window.Image();
     i.onload = () => res(i);
-    i.onerror = rej;
+    i.onerror = () => rej(new Error("Couldn't decode that image — HEIC photos (common on iPhone) often aren't supported by the browser. Try a JPG or PNG, or turn off \"Camera > Formats > Most Compatible\" on the iPhone that took it."));
     i.src = dataUrl;
   });
   const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
@@ -43,19 +58,20 @@ async function compressImageToBlob(file: File, maxDim = 1600, quality = 0.82): P
   canvas.width = Math.round(img.width * scale);
   canvas.height = Math.round(img.height * scale);
   const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Couldn't get a canvas context to resize the image.");
   ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
   return new Promise<Blob>((res, rej) => {
-    canvas.toBlob((blob) => (blob ? res(blob) : rej(new Error("toBlob failed"))), "image/jpeg", quality);
+    canvas.toBlob((blob) => (blob ? res(blob) : rej(new Error("Couldn't finish compressing the image."))), "image/jpeg", quality);
   });
 }
 
-async function uploadImage(blob: Blob, filename: string) {
+async function uploadFile(blob: Blob | File, filename: string) {
   const form = new FormData();
   form.append("file", blob, filename);
   const res = await fetch("/api/upload", { method: "POST", body: form });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.detail || data.error || "upload failed");
-  return data; // { id, viewUrl, imageUrl }
+  return data; // { id, name, mimeType, viewUrl, imageUrl }
 }
 
 // ---------- server API helpers (the passcode gate already ran in middleware) ----------
@@ -255,30 +271,47 @@ export default function App() {
     setSending(false);
   };
 
-  const sendImages = async (fileList: FileList) => {
+  const sendAttachments = async (fileList: FileList) => {
     if (!activeKey) return;
     for (const file of Array.from(fileList).slice(0, 3)) {
       const tempId = `${Date.now()}-${Math.random()}`;
+      const isImage = file.type.startsWith("image/");
       // optimistic placeholder while it uploads to Drive
       setThreadMsgs((m) => [...m, { id: tempId, from: myName, type: "uploading", t: Date.now() }]);
       try {
-        const blob = await compressImageToBlob(file);
-        const uploaded = await uploadImage(blob, file.name || "photo.jpg");
-        const msg = {
-          id: tempId,
-          from: myName,
-          type: "image",
-          url: uploaded.imageUrl,
-          viewUrl: uploaded.viewUrl,
-          driveId: uploaded.id,
-          t: Date.now(),
-        };
+        let msg;
+        if (isImage) {
+          const blob = await compressImageToBlob(file);
+          const uploaded = await uploadFile(blob, file.name || "photo.jpg");
+          msg = {
+            id: tempId,
+            from: myName,
+            type: "image",
+            url: uploaded.imageUrl,
+            viewUrl: uploaded.viewUrl,
+            driveId: uploaded.id,
+            t: Date.now(),
+          };
+        } else {
+          const uploaded = await uploadFile(file, file.name || "file");
+          msg = {
+            id: tempId,
+            from: myName,
+            type: "file",
+            fileName: uploaded.name || file.name || "file",
+            fileSize: file.size,
+            mimeType: uploaded.mimeType || file.type,
+            viewUrl: uploaded.viewUrl,
+            driveId: uploaded.id,
+            t: Date.now(),
+          };
+        }
         setThreadMsgs((m) => m.map((x) => (x.id === tempId ? msg : x)));
         await appendToThread(activeKey, msg);
       } catch (err) {
         setThreadMsgs((m) => m.filter((x) => x.id !== tempId));
         const detail = err instanceof Error ? err.message : "unknown error";
-        window.alert(`Couldn't upload that image to Google Drive.\n\n${detail}`);
+        window.alert(`Couldn't upload that file to Google Drive.\n\n${detail}`);
       }
     }
   };
@@ -481,7 +514,7 @@ export default function App() {
             </div>
 
             <div style={styles.composer}>
-              <button style={styles.iconBtn} onClick={() => fileRef.current?.click()} aria-label="Send image"><ImageIcon size={20} color={TEXT_SECONDARY} /></button>
+              <button style={styles.iconBtn} onClick={() => fileRef.current?.click()} aria-label="Attach file"><Paperclip size={20} color={TEXT_SECONDARY} /></button>
               <input
                 style={styles.composerInput}
                 placeholder="Message"
@@ -496,8 +529,8 @@ export default function App() {
           </div>
         )}
 
-        <input ref={fileRef} type="file" accept="image/*" multiple style={{ display: "none" }}
-          onChange={(e) => { if (e.target.files?.length) sendImages(e.target.files); e.target.value = ""; }} />
+        <input ref={fileRef} type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip,.csv" multiple style={{ display: "none" }}
+          onChange={(e) => { if (e.target.files?.length) sendAttachments(e.target.files); e.target.value = ""; }} />
       </div>
 
       {lightbox && (
@@ -525,6 +558,15 @@ function GatePhone({ children }) {
   );
 }
 
+function FileCardIcon({ mimeType, name }) {
+  const Icon = fileIconFor(mimeType, name);
+  return (
+    <div style={styles.fileCardIconWrap}>
+      <Icon size={20} color={ACCENT} />
+    </div>
+  );
+}
+
 function Bubble({ msg, mine, showAuthor, onImageTap, onDelete }) {
   const canDelete = mine && msg.type !== "deleted" && msg.type !== "uploading";
   return (
@@ -542,6 +584,14 @@ function Bubble({ msg, mine, showAuthor, onImageTap, onDelete }) {
           <span style={styles.bubbleDeleted}>Uploading to Drive…</span>
         ) : msg.type === "image" ? (
           <img src={msg.url} alt="Sent" style={styles.bubbleImage} onClick={() => onImageTap(msg.viewUrl || msg.url)} />
+        ) : msg.type === "file" ? (
+          <a href={msg.viewUrl} target="_blank" rel="noopener noreferrer" style={styles.fileCard}>
+            <FileCardIcon mimeType={msg.mimeType} name={msg.fileName} />
+            <div style={styles.fileCardBody}>
+              <span style={styles.fileCardName}>{msg.fileName}</span>
+              <span style={styles.fileCardSize}>{formatBytes(msg.fileSize)}</span>
+            </div>
+          </a>
         ) : (
           <span style={styles.bubbleText}>{msg.text}</span>
         )}
@@ -619,6 +669,11 @@ const styles: Record<string, React.CSSProperties> = {
   bubbleAuthor: { display: "block", fontSize: 12, fontWeight: 700, color: GOLD, marginBottom: 2 },
   bubbleText: { fontSize: 14.5, lineHeight: 1.4, color: TEXT, whiteSpace: "pre-wrap", wordBreak: "break-word" },
   bubbleImage: { width: 190, height: 190, objectFit: "cover", borderRadius: 12, display: "block", cursor: "zoom-in", marginBottom: 2 },
+  fileCard: { display: "flex", alignItems: "center", gap: 10, textDecoration: "none", padding: "4px 2px", minWidth: 180 },
+  fileCardIconWrap: { width: 36, height: 36, borderRadius: 10, background: "rgba(255,255,255,0.1)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  fileCardBody: { display: "flex", flexDirection: "column", minWidth: 0 },
+  fileCardName: { fontSize: 13.5, fontWeight: 600, color: TEXT, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 160 },
+  fileCardSize: { fontSize: 11.5, color: "rgba(255,255,255,0.55)" },
   bubbleMeta: { display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 3, marginTop: 2 },
   bubbleTime: { fontSize: 10.5, color: "rgba(255,255,255,0.55)" },
   bubbleDeleted: { fontSize: 13.5, fontStyle: "italic", color: "rgba(255,255,255,0.5)" },
