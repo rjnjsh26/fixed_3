@@ -4,9 +4,11 @@ import { verifyToken } from "./lib/auth";
 import { getSessionEpoch } from "./lib/redis";
 
 // api/cron is excluded here because the weekly reset job authenticates with
-// its own bearer-token secret, not a login cookie.
+// its own bearer-token secret, not a login cookie. api/gdrive is excluded
+// because it's a one-time admin setup flow, protected by its own separate
+// GDRIVE_SETUP_SECRET rather than the group passcode.
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|login|api/login|api/cron).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|login|api/login|api/cron|api/gdrive).*)"],
 };
 
 export async function middleware(req: NextRequest) {
