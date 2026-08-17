@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getRedis } from "../../../../lib/redis";
+import { deleteFromDrive } from "../../../../lib/gdrive";
 
 export async function GET(_req: Request, { params }: { params: { key: string } }) {
   const redis = getRedis();
@@ -50,5 +51,13 @@ export async function DELETE(req: Request, { params }: { params: { key: string }
   }
 
   await redis.sadd(`euo:thread:${params.key}:deleted`, messageId);
+
+  // Best-effort: also remove the actual file from Drive so deleted photos
+  // don't linger in the folder forever. Awaited so it finishes before the
+  // serverless function is torn down.
+  if (found.type === "image" && found.driveId) {
+    await deleteFromDrive(found.driveId);
+  }
+
   return NextResponse.json({ ok: true });
 }
