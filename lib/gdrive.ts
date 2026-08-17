@@ -41,25 +41,37 @@ export async function uploadToDrive(buffer: Buffer, mimeType: string, filename: 
   const created = await drive.files.create({
     requestBody: { name: filename, parents: folderId ? [folderId] : undefined },
     media: { mimeType, body: Readable.from(buffer) },
-    fields: "id, name, webViewLink, mimeType",
+    fields: "id, name, mimeType",
   });
 
   const fileId = created.data.id!;
 
-  // Make it viewable by anyone with the link, so it can render inline in
-  // chat bubbles without every viewer needing their own Drive permission.
-  await drive.permissions.create({
-    fileId,
-    requestBody: { role: "reader", type: "anyone" },
-  });
-
+  // No public "anyone with the link" permission is granted here on purpose —
+  // files stay private on Drive. Everyone in the app views/downloads them
+  // through this app's own /api/files/[id] proxy instead, which is gated
+  // by the normal login. Nothing about Google Drive is ever exposed to users.
   return {
     id: fileId,
     name: created.data.name || filename,
     mimeType: created.data.mimeType || mimeType,
-    viewUrl: created.data.webViewLink || `https://drive.google.com/file/d/${fileId}/view`,
-    imageUrl: `https://drive.google.com/thumbnail?id=${fileId}&sz=w1600`,
   };
+}
+
+// Fetches just the metadata (name/type/size) for a file — used by the
+// download proxy to set the right filename and Content-Type.
+export async function getFileMeta(fileId: string) {
+  const drive = getDrive();
+  const res = await drive.files.get({ fileId, fields: "id, name, mimeType, size" });
+  return res.data;
+}
+
+// Streams the actual file bytes — used by the download proxy so the file
+// content flows straight from Drive to the browser without ever exposing a
+// drive.google.com URL to the user.
+export async function getFileStream(fileId: string) {
+  const drive = getDrive();
+  const res = await drive.files.get({ fileId, alt: "media" }, { responseType: "stream" });
+  return res.data;
 }
 
 export async function deleteFromDrive(fileId: string) {
