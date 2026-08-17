@@ -1,6 +1,6 @@
 "use client";
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import { ArrowLeft, Search, Send, Users, X, Plus, Trash2, Paperclip, FileText, FileSpreadsheet, File as FileIconGeneric, Archive } from "lucide-react";
+import { ArrowLeft, Search, Send, Users, X, Plus, Trash2, Paperclip, FileText, FileSpreadsheet, File as FileIconGeneric, Archive, Download } from "lucide-react";
 
 const EVERYONE_KEY = "everyone";
 const POLL_MS = 2500;
@@ -287,9 +287,8 @@ export default function App() {
             id: tempId,
             from: myName,
             type: "image",
-            url: uploaded.imageUrl,
-            viewUrl: uploaded.viewUrl,
             driveId: uploaded.id,
+            fileName: uploaded.name || file.name || "photo.jpg",
             t: Date.now(),
           };
         } else {
@@ -301,7 +300,6 @@ export default function App() {
             fileName: uploaded.name || file.name || "file",
             fileSize: file.size,
             mimeType: uploaded.mimeType || file.type,
-            viewUrl: uploaded.viewUrl,
             driveId: uploaded.id,
             t: Date.now(),
           };
@@ -535,7 +533,17 @@ export default function App() {
 
       {lightbox && (
         <div style={styles.lightboxOverlay} onClick={() => setLightbox(null)}>
-          <img src={lightbox} alt="Full size" style={styles.lightboxImg} />
+          <img src={lightbox} alt="Full size" style={styles.lightboxImg} onClick={(e) => e.stopPropagation()} />
+          <a
+            href={`${lightbox}?download=1`}
+            download
+            style={styles.lightboxDownload}
+            onClick={(e) => e.stopPropagation()}
+            aria-label="Download photo"
+            title="Download"
+          >
+            <Download size={18} color={TEXT} />
+          </a>
           <button style={styles.lightboxClose} onClick={() => setLightbox(null)}><X size={20} color={TEXT} /></button>
         </div>
       )}
@@ -569,6 +577,8 @@ function FileCardIcon({ mimeType, name }) {
 
 function Bubble({ msg, mine, showAuthor, onImageTap, onDelete }) {
   const canDelete = mine && msg.type !== "deleted" && msg.type !== "uploading";
+  const fileUrl = msg.driveId ? `/api/files/${msg.driveId}` : null;
+  const downloadUrl = msg.driveId ? `/api/files/${msg.driveId}?download=1` : null;
   return (
     <div style={{ ...styles.bubbleRow, justifyContent: mine ? "flex-end" : "flex-start" }}>
       {canDelete && (
@@ -581,17 +591,27 @@ function Bubble({ msg, mine, showAuthor, onImageTap, onDelete }) {
         {msg.type === "deleted" ? (
           <span style={styles.bubbleDeleted}>{mine ? "You deleted this message" : "This message was deleted"}</span>
         ) : msg.type === "uploading" ? (
-          <span style={styles.bubbleDeleted}>Uploading to Drive…</span>
+          <span style={styles.bubbleDeleted}>Uploading…</span>
         ) : msg.type === "image" ? (
-          <img src={msg.url} alt="Sent" style={styles.bubbleImage} onClick={() => onImageTap(msg.viewUrl || msg.url)} />
+          <div style={styles.imageWrap}>
+            <img src={fileUrl} alt="Sent" style={styles.bubbleImage} onClick={() => onImageTap(fileUrl)} />
+            <a href={downloadUrl} download={msg.fileName || "photo.jpg"} style={styles.imageDownloadBtn} aria-label="Download photo" title="Download">
+              <Download size={13} color="#fff" />
+            </a>
+          </div>
         ) : msg.type === "file" ? (
-          <a href={msg.viewUrl} target="_blank" rel="noopener noreferrer" style={styles.fileCard}>
-            <FileCardIcon mimeType={msg.mimeType} name={msg.fileName} />
-            <div style={styles.fileCardBody}>
-              <span style={styles.fileCardName}>{msg.fileName}</span>
-              <span style={styles.fileCardSize}>{formatBytes(msg.fileSize)}</span>
-            </div>
-          </a>
+          <div style={styles.fileCard}>
+            <a href={fileUrl} target="_blank" rel="noopener noreferrer" style={styles.fileCardMain}>
+              <FileCardIcon mimeType={msg.mimeType} name={msg.fileName} />
+              <div style={styles.fileCardBody}>
+                <span style={styles.fileCardName}>{msg.fileName}</span>
+                <span style={styles.fileCardSize}>{formatBytes(msg.fileSize)}</span>
+              </div>
+            </a>
+            <a href={downloadUrl} download={msg.fileName || "file"} style={styles.fileCardDownloadBtn} aria-label="Download file" title="Download">
+              <Download size={15} color={TEXT_SECONDARY} />
+            </a>
+          </div>
         ) : (
           <span style={styles.bubbleText}>{msg.text}</span>
         )}
@@ -669,10 +689,18 @@ const styles: Record<string, React.CSSProperties> = {
   bubbleAuthor: { display: "block", fontSize: 12, fontWeight: 700, color: GOLD, marginBottom: 2 },
   bubbleText: { fontSize: 14.5, lineHeight: 1.4, color: TEXT, whiteSpace: "pre-wrap", wordBreak: "break-word" },
   bubbleImage: { width: 190, height: 190, objectFit: "cover", borderRadius: 12, display: "block", cursor: "zoom-in", marginBottom: 2 },
-  fileCard: { display: "flex", alignItems: "center", gap: 10, textDecoration: "none", padding: "4px 2px", minWidth: 180 },
+  imageWrap: { position: "relative", display: "inline-block" },
+  imageDownloadBtn: {
+    position: "absolute", bottom: 8, right: 8, width: 26, height: 26, borderRadius: 13,
+    background: "rgba(12,17,22,0.65)", display: "flex", alignItems: "center", justifyContent: "center",
+    textDecoration: "none",
+  },
+  fileCard: { display: "flex", alignItems: "center", gap: 4, minWidth: 190 },
+  fileCardMain: { display: "flex", alignItems: "center", gap: 10, textDecoration: "none", padding: "4px 2px", flex: 1, minWidth: 0 },
+  fileCardDownloadBtn: { width: 30, height: 30, borderRadius: 15, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, textDecoration: "none" },
   fileCardIconWrap: { width: 36, height: 36, borderRadius: 10, background: "rgba(255,255,255,0.1)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
   fileCardBody: { display: "flex", flexDirection: "column", minWidth: 0 },
-  fileCardName: { fontSize: 13.5, fontWeight: 600, color: TEXT, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 160 },
+  fileCardName: { fontSize: 13.5, fontWeight: 600, color: TEXT, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 140 },
   fileCardSize: { fontSize: 11.5, color: "rgba(255,255,255,0.55)" },
   bubbleMeta: { display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 3, marginTop: 2 },
   bubbleTime: { fontSize: 10.5, color: "rgba(255,255,255,0.55)" },
@@ -690,4 +718,5 @@ const styles: Record<string, React.CSSProperties> = {
   lightboxOverlay: { position: "fixed", inset: 0, background: "rgba(4,6,9,0.92)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: 24 },
   lightboxImg: { maxWidth: "100%", maxHeight: "100%", borderRadius: 12 },
   lightboxClose: { position: "absolute", top: 24, right: 24, width: 38, height: 38, borderRadius: 19, background: "rgba(255,255,255,0.12)", border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" },
+  lightboxDownload: { position: "absolute", top: 24, right: 74, width: 38, height: 38, borderRadius: 19, background: "rgba(255,255,255,0.12)", display: "flex", alignItems: "center", justifyContent: "center", textDecoration: "none" },
 };
