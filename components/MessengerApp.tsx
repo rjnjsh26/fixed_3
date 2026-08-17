@@ -53,8 +53,9 @@ async function uploadImage(blob: Blob, filename: string) {
   const form = new FormData();
   form.append("file", blob, filename);
   const res = await fetch("/api/upload", { method: "POST", body: form });
-  if (!res.ok) throw new Error("upload failed");
-  return res.json(); // { id, viewUrl, imageUrl }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || data.error || "upload failed");
+  return data; // { id, viewUrl, imageUrl }
 }
 
 // ---------- server API helpers (the passcode gate already ran in middleware) ----------
@@ -274,9 +275,10 @@ export default function App() {
         };
         setThreadMsgs((m) => m.map((x) => (x.id === tempId ? msg : x)));
         await appendToThread(activeKey, msg);
-      } catch {
+      } catch (err) {
         setThreadMsgs((m) => m.filter((x) => x.id !== tempId));
-        window.alert("Couldn't upload that image to Google Drive — try again.");
+        const detail = err instanceof Error ? err.message : "unknown error";
+        window.alert(`Couldn't upload that image to Google Drive.\n\n${detail}`);
       }
     }
   };
