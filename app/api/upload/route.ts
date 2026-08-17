@@ -4,6 +4,11 @@ import { uploadToDrive } from "../../../lib/gdrive";
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
+// Vercel's serverless functions cap the request body around 4.5MB
+// regardless of plan — this limit exists to stay safely under that, not
+// because of anything in this app's own logic.
+const MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
+
 export async function POST(req: Request) {
   const formData = await req.formData().catch(() => null);
   const file = formData?.get("file");
@@ -11,8 +16,8 @@ export async function POST(req: Request) {
   if (!file || !(file instanceof File)) {
     return NextResponse.json({ error: "No file provided." }, { status: 400 });
   }
-  if (file.size > 15 * 1024 * 1024) {
-    return NextResponse.json({ error: "File too large (15MB max)." }, { status: 400 });
+  if (file.size > MAX_UPLOAD_BYTES) {
+    return NextResponse.json({ error: "File too large — 4MB max on this hosting plan." }, { status: 400 });
   }
 
   try {
