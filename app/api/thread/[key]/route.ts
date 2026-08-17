@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { getRedis } from "../../../../lib/redis";
-import { deleteFromDrive } from "../../../../lib/gdrive";
 
 export async function GET(_req: Request, { params }: { params: { key: string } }) {
   const redis = getRedis();
@@ -52,12 +51,10 @@ export async function DELETE(req: Request, { params }: { params: { key: string }
 
   await redis.sadd(`euo:thread:${params.key}:deleted`, messageId);
 
-  // Best-effort: also remove the actual file from Drive so deleted photos
-  // and files don't linger in the folder forever. Awaited so it finishes
-  // before the serverless function is torn down.
-  if (found.driveId) {
-    await deleteFromDrive(found.driveId);
-  }
+  // Deliberately NOT deleting anything from Drive here — "delete for
+  // everyone" only hides the message from the chat. The actual file stays
+  // in the Drive folder permanently, even after this delete and even after
+  // the weekly reset (which only clears chat data, never touches Drive).
 
   return NextResponse.json({ ok: true });
 }
